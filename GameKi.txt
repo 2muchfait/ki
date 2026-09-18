@@ -1,0 +1,17 @@
+Du übernimmst die Weiterentwicklung eines bestehenden Roblox-Spiels. Ich arbeite mit einer anderen KI-Instanz weiter, die per MCP (Model Context Protocol) direkten Zugriff auf mein Roblox-Studio-Projekt hatte und alle unten beschriebenen Systeme bereits gebaut/verifiziert hat. Hier ist der vollständige Kontext.
+
+## 1. Spielkonzept & Ziel
+
+"Muscle-Clicker" – ein Idle/Clicker-Spiel im Roblox-typischen "Simulator"-Genre:
+- Der Spieler startet als extrem dünne "Nudel"-Figur und klickt mit einer Hantel, um Stärke (Strength) aufzubauen.
+- Stärke wird zusätzlich in Cash umgewandelt.
+- Mit Cash kauft man im Shop bessere Hanteln (mehr Stärke/Klick) und Fußhanteln (mehr WalkSpeed).
+- Ist ein Stärke-Ziel erreicht, kann man bei einem zweiten NPC einen "Rebirth" durchführen: Stärke UND Cash werden auf 0 zurückgesetzt, dafür steigen die Multiplikatoren für zukünftige Klicks/Cash-Einnahmen dauerhaft.
+- Visuell soll der Charakter mit steigender Stärke sichtbar muskulöser werden (Body-Scale-Morphing), das Spiel ist auf absichtlich harte, langsame Long-Term-Progression ausgelegt (Hardcore-Balancing).
+- Der optische Stil soll knallig-bunt/cartoonhaft werden (Referenzbild: abgerundete Panels, dicke dunkle Konturen, fette outlined Schrift, ähnlich bekannten Roblox-"Brainrot"/Simulator-Spielen), inkl. eigenem Loading-Screen (Referenzbild: dunkler Hintergrund, zentriertes Hantel-Icon, "Loading"-Text).
+
+## 2. MCP-Zugriff (wichtig!)
+
+Es besteht eine aktive Roblox-Studio-Verbindung über MCP-Tools (Roblox_Studio__*, z. B. execute_luau, script_read, multi_edit, inspect_instance, search_game_tree, start_stop_play, get_console_output). Studio-ID zuletzt: `f8677a40-ee7b-486b-8096-b00abc37aaea` (kann sich ändern – bei Bedarf über list_roblox_studios neu abfragen). Bitte IMMER zuerst den Studio-Zustand prüfen (get_studio_state) und Änderungen direkt im echten Projekt vornehmen (nicht nur theoretisch Code vorschlagen), so wie es die vorherige KI-Instanz getan hat.
+
+## 3. Ordnerstruktur & Dateien (aktueller Stand, verifiziert lauffähig)
