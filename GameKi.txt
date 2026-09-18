@@ -15,3 +15,74 @@ Du übernimmst die Weiterentwicklung eines bestehenden Roblox-Spiels. Ich arbeit
 Es besteht eine aktive Roblox-Studio-Verbindung über MCP-Tools (Roblox_Studio__*, z. B. execute_luau, script_read, multi_edit, inspect_instance, search_game_tree, start_stop_play, get_console_output). Studio-ID zuletzt: `f8677a40-ee7b-486b-8096-b00abc37aaea` (kann sich ändern – bei Bedarf über list_roblox_studios neu abfragen). Bitte IMMER zuerst den Studio-Zustand prüfen (get_studio_state) und Änderungen direkt im echten Projekt vornehmen (nicht nur theoretisch Code vorschlagen), so wie es die vorherige KI-Instanz getan hat.
 
 ## 3. Ordnerstruktur & Dateien (aktueller Stand, verifiziert lauffähig)
+
+ReplicatedStorage
+└── Modules (Folder)
+├── ToolConfig (ModuleScript) – Hantel-Stufen: Name, BasePower, Basis-Preis, Order
+├── RebirthConfig (ModuleScript) – Rebirth-Ziel-Formel, Kosten-Skalierungsfaktor, Multiplikatoren
+├── SpeedConfig (ModuleScript) – Fußhantel-Stufen: Name, WalkSpeed, Basis-Preis, Order
+└── ZoneConfig (ModuleScript) – Zuordnung NPC-Name <-> ZoneId <-> ZonePart-Name
+
+ServerScriptService
+├── Modules (Folder)
+│ ├── RemoteEventsModule (ModuleScript) – erstellt alle RemoteEvents automatisch bei Serverstart
+│ ├── DataManager (ModuleScript) – DataStore: Laden/Speichern/Cache pro Spieler
+│ ├── ToolFactory (ModuleScript) – erzeugt Tool-Objekte inkl. Animation/Sound-Platzhalter
+│ ├── ZoneManager (ModuleScript) – Touch-basierte Zonen-Erkennung (Shop/Rebirth NPCs)
+│ ├── CharacterManager (ModuleScript) – wendet Body-Scaling (Nudel->Muskelprotz) + WalkSpeed an
+│ └── ScalingConfig (ModuleScript) – Min/Max-Werte für die Body-Scale-Transformation
+└── MainServer (Script) – zentrales Server-Skript, verbindet alle Module + RemoteEvent-Handler
+
+StarterPlayer
+└── StarterPlayerScripts
+├── ClickClient (LocalScript) – sendet Klicks an Server, spielt Animation/Sound ab
+├── UIClient (LocalScript) – baut komplette UI zur Laufzeit (Stats-HUD, Shop mit 2 Tabs, Rebirth-Panel)
+└── RemoteDebugCheck (LocalScript) – Debug-Tool, prüft ob alle RemoteEvents existieren (kann später gelöscht werden)
+
+Workspace
+└── NPCs (Folder)
+├── DumbbellShopNPC (Model, R6-Rig) → Kind-Part "ZonePart" (unsichtbar, Touch-Zone)
+└── RebirthNPC (Model) → Kind-Part "ZonePart" (unsichtbar, Touch-Zone)
+
+
+## 4. Funktion der Skripte & Zusammenhänge
+
+- **RemoteEventsModule**: Erstellt bei Serverstart ALLE benötigten RemoteEvents in `ReplicatedStorage.RemoteEvents` (falls sie fehlen). Aktuelle Liste: `ClickTool`, `PurchaseTool`, `PurchaseAnkleWeight`, `EquipTool`, `RequestRebirth`, `UpdateStats`, `PurchaseResult`, `RebirthResult`, `ZoneUIToggle`. MUSS als Erstes in MainServer aufgerufen werden (vor allen anderen `require()`-Aufrufen!), sonst hängt der Client in `WaitForChild` ("Infinite yield").
+- **DataManager**: Lädt/speichert pro Spieler `Strength`, `Cash`, `Rebirths`, `EquippedTool`, `OwnedTools`, `AnkleWeightLevel` via DataStoreService. Füllt bei Altspielern fehlende neue Felder automatisch nach (Achtung: `deepCopy()` nur bei Tabellen aufrufen, nicht bei einfachen Zahlen – das war ein realer Bug, der schon gefixt wurde).
+- **ToolFactory**: Erstellt (falls nicht vorhanden) einfache Platzhalter-Tool-Modelle in `ServerStorage.Tools` inkl. `ClickAnimation` (Animation-Objekt) und `ClickSound` (Sound-Objekt im Handle). Beide haben noch Platzhalter-IDs `rbxassetid://0` – müssen mit echten IDs befüllt werden (Konstanten `DEFAULT_CLICK_ANIMATION_ID` / `DEFAULT_CLICK_SOUND_ID` oben in der Datei).
+- **ZoneManager**: Verbindet `Touched`/`TouchEnded` auf dem `ZonePart` jedes NPCs (per `ZoneConfig` gefunden), reagiert NUR auf `HumanoidRootPart`-Kontakt, feuert `ZoneUIToggle` an genau den betroffenen Client. Bietet `IsPlayerInZone(player, zoneId)` für Server-seitige Anti-Exploit-Checks.
+- **CharacterManager**: Setzt beim Spawn + bei jedem Klick die R15-Body-Scale-NumberValues des Humanoid (`BodyWidthScale`, `BodyDepthScale`, `BodyTypeScale`, `BodyHeightScale`) anhand einer Sättigungskurve basierend auf `Strength`. **Funktioniert NUR mit R15-Rigs.**
+- **ScalingConfig**: Zentrale Min/Max-Werte für das Morphing (aktuell noch `MinWidthScale = 0.7` / `MinDepthScale = 0.7` – siehe "Nächste Schritte", soll auf ~0.1–0.2 runter).
+- **MainServer**: Das Herzstück. Reihenfolge beim Start: (1) RemoteEvents erstellen, (2) restliche Module MIT Fehlerdiagnose laden (`safeRequire`, gibt klare Warnungen statt stillem Absturz), (3) `ToolFactory.Setup()`, (4) `ZoneManager.Setup()`. Enthält Handler für Klicks (Stärke/Cash-Formel + Body-Scale-Update), Tool-Kauf, Tool-Ausrüsten, Fußhantel-Kauf, Rebirth (Hardcore-Reset: Strength UND Cash auf 0), sowie `PlayerAdded`/`CharacterAdded`-Logik (inkl. Sonderfall: Charakter existiert schon beim PlayerAdded).
+- **ClickClient**: Lädt bei Tool-Equip die `ClickAnimation` des Tools über `Humanoid:LoadAnimation()`, spielt sie + den `ClickSound` bei jedem `Tool.Activated` ab, feuert danach `ClickTool` an den Server. Hat clientseitigen Cooldown (aktuell 0.05s, siehe "Nächste Schritte").
+- **UIClient**: Baut zur Laufzeit das komplette UI (kein manuelles StarterGui nötig!): Stats-HUD (immer sichtbar), Shop-Panel mit 2 Tabs ("Hanteln"/"Fußhanteln", Preise werden LIVE über `RebirthConfig.GetScaledPrice()` berechnet – identische Formel wie im Server, damit nichts auseinanderläuft), Rebirth-Panel (zeigt Ziel-Stärke, Multiplikatoren). Reagiert auf `ZoneUIToggle` mit Tween-Pop-Animationen (öffnen/schließen). Hat Debug-Testtasten F5/F6 zum manuellen Öffnen der Panels ohne NPC-Nähe.
+
+## 5. Balancing-Formeln (aktueller Stand)
+
+- Stärke/Klick = `BasePower des Tools * (1 + Rebirths * 0.25)`
+- Cash/Klick = `StärkeGewinn * 0.5 * (1 + Rebirths * 0.15)`
+- Rebirth-Ziel (Stärke) = `1000 * 3.5^Rebirths`
+- Preis (Hantel/Fußhantel) = `BasisPreis * 3.5^Rebirths`
+- Rebirth: `Strength = 0`, `Cash = 0`, `Rebirths += 1` (OwnedTools/EquippedTool/AnkleWeightLevel bleiben erhalten)
+
+## 6. Aktueller Stand (verifiziert per Live-Playtest über MCP)
+
+✅ Komplettes System lauffähig getestet: Alle 9 RemoteEvents werden korrekt erstellt, `UpdateStats` kommt beim Client an, Start-Tool liegt im Backpack, Zonen feuern korrekt (`ZoneUIToggle` beim Betreten/Verlassen beider NPC-Zonen im Konsolen-Log bestätigt), Shop-Käufe und Rebirth funktionieren.
+
+Zuletzt behobene Bugs: (1) `PurchaseAnkleWeight` fehlte in `RemoteEventsModule`-Eventliste → hat MainServer nach dieser Zeile abstürzen lassen, wodurch nichts danach im Skript lief. (2) `AnkleWeightLevel` fehlte in `DataManager`-Default-Daten. (3) `deepCopy()`-Bug beim Nachfüllen fehlender Felder bei Zahlen statt Tabellen. (4) Ein doppeltes, altes `MainServer`-Script wurde entfernt.
+
+**Bekannter, noch offener Blocker:** Der Spieler-Charakter läuft aktuell auf **R6** (verifiziert: `Humanoid.RigType == Enum.HumanoidRigType.R6`, `BodyWidthScale` etc. fehlen). Das Morphing kann so NICHT funktionieren. Muss manuell in Studio umgestellt werden: **Home-Ribbon → Game Settings → Reiter "Avatar" → Avatar Type → R15 (oder PlayerChoice) → Save.** Unklar, ob das bereits erledigt wurde – bitte als Erstes prüfen/nachfragen.
+
+Zuletzt begonnen: Lighting/PostEffects für den Cartoon-Look wurden bereits erfolgreich gesetzt (`ColorCorrectionEffect`, `BloomEffect`, `SunRaysEffect`, angepasste Lighting-Properties wie Brightness/Ambient/ColorShift) – das ist FERTIG.
+
+## 7. Nächste offene Aufgaben (in dieser Reihenfolge sinnvoll)
+
+1. **Prüfen, ob Avatar Type auf R15 umgestellt wurde** (siehe Blocker oben) – falls nicht, den Nutzer daran erinnern, da ich das nicht per Skript setzen kann.
+2. **Loading Screen** (NICHT begonnen): Neues LocalScript in `ReplicatedFirst`, das beim Spielstart eine Vollbild-GUI zeigt – dunkler Hintergrund, zentriertes Hantel-Icon (z. B. aus Frames/UICorner gebaut, da kein Image-Asset vorhanden), "Loading"-Text, Ladebalken mit Prozentanzeige, blendet smooth aus, sobald der Charakter gespawnt ist (`ReplicatedFirst:RemoveDefaultLoadingScreen()` nutzen, ContentProvider:PreloadAsync für echten Fortschritt).
+3. **UI-Redesign** (NICHT begonnen): Bestehendes `UIClient`-Skript (Stats/Shop/Rebirth) im bunten Cartoon-Stil überarbeiten – dickere `UIStroke`-Konturen, `TextStrokeColor3` für outlined Text, kräftigere Farbverläufe, größere `UICorner`-Radien, Font `FredokaOne` für Titel.
+4. **Zwei neue Gamepass-Buttons** (NICHT begonnen): "Auto-Clicker" (automatisiert Klicks server-seitig für Besitzer) und "2x Speed" (verdoppelt WalkSpeed permanent). Braucht neues Modul `GamepassConfig.lua` (ReplicatedStorage, Platzhalter-IDs) + `GamepassManager.lua` (Server, Ownership-Check via `MarketplaceService:UserOwnsGamePassAsync`, Re-Check via `PromptGamePassPurchaseFinished`). Buttons mittig-links am Bildschirmrand, gleiches Theme wie restliche UI.
+5. **Charakter-Morphing-Minimum anpassen** (NICHT begonnen): `ScalingConfig.MinWidthScale`/`MinDepthScale` von aktuell 0.7 auf ca. 0.1–0.2 senken (Hinweis: Roblox könnte intern trotzdem auf ~0.7 clampen – im Playtest verifizieren, ob der Effekt sichtbar ist, sonst Nutzer informieren).
+6. **Klick-Cooldown erhöhen** (NICHT begonnen): `MIN_CLICK_INTERVAL` in `MainServer.server.lua` (aktuell 0.08) und `CLICK_COOLDOWN` in `ClickClient.client.lua` (aktuell 0.05) auf ca. 0.8–1.0 Sekunden erhöhen (Spam-Schutz laut Nutzerwunsch).
+7. **Balancing weiter verschärfen** (NICHT begonnen): `RebirthConfig.CostScalingFactor` (aktuell 3.5) deutlich erhöhen (z. B. auf 6–8), damit Kosten/Rebirth-Ziele noch schneller explodieren.
+
+Bitte nach jeder größeren Änderung über MCP direkt im Studio per Playtest (`start_stop_play` + `get_console_output`) verifizieren, ob alles fehlerfrei läuft, bevor du zur nächsten Aufgabe übergehst – das hat sich als zuverlässigste Methode erwiesen, um Sync-Probleme zwischen Chat-Code und echtem Studio-Projekt frühzeitig zu erkennen.
